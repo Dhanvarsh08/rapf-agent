@@ -1,0 +1,10 @@
+streamlit
+groq
+langchain
+langchain-groq
+langchain-community
+chromadb
+sentence-transformers
+python-dotenv
+pandas
+fpdf2
