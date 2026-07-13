@@ -109,3 +109,17 @@ If you use this work, please cite:
 
 > Rajan, D. (2026). *A Requirements-Aware Prompting Framework for LLM-Based Code Generation*. 
 > M.Sc. Thesis, Chalmers University of Technology & University of Gothenburg.
+
+---
+
+## License
+
+This project is licensed under **CC BY-NC 4.0** — free for non-commercial use with attribution.  
+For commercial licensing, contact: varshinirajan0811@gmail.com
+
+## Citation
+
+If you use this work, please cite:
+
+> Rajan, D. (2026). *A Requirements-Aware Prompting Framework for LLM-Based Code Generation*.  
+> M.Sc. Thesis, Chalmers University of Technology & University of Gothenburg.
