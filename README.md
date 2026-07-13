@@ -100,3 +100,12 @@ Grounded in ISO/IEC/IEEE 29148:2018
 **Author:** Dhanvarshinie Rajan  
 **Portfolio:** https://dhanvarshinie.lovable.app/  
 **LinkedIn:** https://www.linkedin.com/in/dhanvarshinie-rajan/
+
+---
+
+## Citation
+
+If you use this work, please cite:
+
+> Rajan, D. (2026). *A Requirements-Aware Prompting Framework for LLM-Based Code Generation*. 
+> M.Sc. Thesis, Chalmers University of Technology & University of Gothenburg.
