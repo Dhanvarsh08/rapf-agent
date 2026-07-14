@@ -39,251 +39,71 @@ st.sidebar.markdown("""
 """)
 
 st.sidebar.markdown("""
-> *Ever asked an LLM to implement a vague requirement and got confidently wrong code back?*  
-> **That's the problem RAPF solves.**
+*Ever asked an AI to build something from a vague requirement and got confidently wrong code back?
+That's the problem RAPF solves.*
 """)
 
 st.sidebar.markdown("""
 ---
-### 🔍 How it works
+### How it works
 
-RAPF checks if a requirement is **ready to build** — or still needs work.
+RAPF acts as a quality gate before any code gets written.
 
-When a requirement is vague or incomplete, handing it to a developer just produces 
-confidently wrong code. RAPF catches that **before** implementation begins.
+It reads your requirement, scores it on four quality checks, and makes a decision: 
+is this ready to build, or does it need work first?
 
-Instead of guessing, the LLM generates a **structured defect report** — telling you 
-exactly what's missing, ambiguous, or untestable. Fix the requirement first, 
-then build.
-
-Think of it as a **quality gate**: pass → implement, fail → report.
+If it's ready → the AI writes code.  
+If it's not → the AI writes a detailed report explaining exactly what's wrong, 
+so you can fix the requirement before wasting development time.
 """)
 
 st.sidebar.markdown("""
 ---
-### 📊 Quality Checks (ISO 29148)
+### The four quality checks
 
-Each requirement is scored **1–5** on four dimensions:
+Each requirement is automatically scored **1–5** on:
 
-| | Attribute | What it asks |
+| | Attribute | The question it asks |
 |---|---|---|
-| **U** | Unambiguity | Is it clear? Could it mean two things? |
-| **C** | Completeness | Does it have everything a developer needs? |
-| **V** | Verifiability | Can you write a test for it? |
-| **S** | Consistency | Does it contradict itself? |
-
-Score **4 or 5** = ready to build. Below 4 = needs work first.
+| **U** | Unambiguity | Is it clear? Could a developer interpret it two different ways? |
+| **C** | Completeness | Does it contain everything needed to build it? |
+| **V** | Verifiability | Can you write a test for it? Is there a measurable outcome? |
+| **S** | Consistency | Does it contradict itself or other requirements? |
 """)
 
 st.sidebar.markdown("""
 ---
-### ⚡ When does RAPF implement vs. report?
+### The decision rule
 
-RAPF makes a simple decision for each requirement:
+RAPF looks at just two scores to decide whether to implement or report:
 
-🟢 **Ready to build?**  
-If the requirement is **clear enough to understand** and **specific enough to test**, 
-the LLM writes code.
+- If **Unambiguity ≥ 4** and **Verifiability ≥ 4** → the requirement is clear enough 
+to understand and specific enough to test → **AI writes code**
+- Otherwise → the requirement isn't ready yet → **AI writes a defect report**
 
-🔴 **Not ready yet?**  
-If it's vague or untestable, the LLM writes a defect report instead — 
-listing exactly what's missing or unclear before anyone starts building.
-
-The two things that matter most are:
-- **Is it clear?** (one interpretation only)
-- **Can you test it?** (measurable outcome)
-
-If both are true, build it. If not, fix it first.
+*Why just U and V? Because ambiguity makes any implementation wrong by definition, 
+and if you can't test it, you'll never know if it was built correctly. 
+Completeness and consistency matter too — but they show up in the defect report, 
+not the build decision.*
 """)
 
 st.sidebar.markdown("""
 ---
-### 💡 Why it matters
+### Why it matters
 
-Most LLMs will attempt to implement *any* requirement — even ones that are 
-too vague to build correctly.
-
-RAPF stops that. It catches bad requirements **before** they waste 
-developer time, and tells you exactly what to fix.
+Most AI tools will attempt to implement any requirement, no matter how vague. 
+RAPF doesn't. It catches the problems before they become bugs — and tells you 
+exactly what to fix.
 """)
 
 st.sidebar.markdown("""
 ---
-### 👩‍💻 Built by
+### Built by
 **Dhanvarshinie Rajan**  
 M.Sc. Software Engineering & Management  
-Chalmers & University of Gothenburg · 2026  
-[🌐 Portfolio](https://dhanvarshinie.lovable.app/)
+Chalmers University of Technology & University of Gothenburg · 2026  
+[Portfolio](https://dhanvarshinie.lovable.app/)
 """)
-
-def generate_html_report(results_df, run_mode):
-    """Generate a clean HTML report explaining what RAPF did."""
-
-    total = len(results_df)
-    implement = int(results_df["Exec Flag"].sum()) if "Exec Flag" in results_df.columns else 0
-    report_only = total - implement
-    diagnostic = int((results_df["RAPF Behaviour"] == "Diagnostic").sum()) if "RAPF Behaviour" in results_df.columns else 0
-    implementation_count = int((results_df["RAPF Behaviour"] == "Implementation").sum()) if "RAPF Behaviour" in results_df.columns else 0
-    generated_at = datetime.now().strftime("%d %B %Y, %H:%M")
-
-    rows_html = ""
-    for i, row in results_df.iterrows():
-        behaviour = str(row.get("RAPF Behaviour", "Unknown"))
-        policy = str(row.get("Policy", "Unknown"))
-        req = str(row.get("Requirement", ""))
-        u = row.get("U", "?")
-        c = row.get("C", "?")
-        v = row.get("V", "?")
-        s = row.get("S", "?")
-        arch = str(row.get("Archetype", "?"))
-        what = str(row.get("What happened?", ""))
-        output = str(row.get("RAPF Output", ""))[:600]
-
-        if behaviour == "Diagnostic":
-            badge_color = "#dc3545"
-            badge_text = "DEFECT REPORT"
-            card_border = "#dc3545"
-        else:
-            badge_color = "#28a745"
-            badge_text = "IMPLEMENTED"
-            card_border = "#28a745"
-
-        rows_html += f"""
-        <div style="border-left: 4px solid {card_border}; background: #f8f9fa; padding: 16px; margin-bottom: 16px; border-radius: 4px;">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-                <span style="background:{badge_color}; color:white; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:bold;">{badge_text}</span>
-                <span style="font-weight:600; font-size:14px;">{req}</span>
-            </div>
-            <div style="display:flex; gap:12px; margin-bottom:8px; flex-wrap:wrap;">
-                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;"><b>U</b> {u}</span>
-                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;"><b>C</b> {c}</span>
-                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;"><b>V</b> {v}</span>
-                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;"><b>S</b> {s}</span>
-                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;">Archetype: {arch}</span>
-                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;">Policy: {policy}</span>
-            </div>
-            <div style="font-size:13px; color:#555; font-style:italic; margin-bottom:8px;">{what}</div>
-            <details>
-                <summary style="cursor:pointer; font-size:13px; color:#1a4f7a; font-weight:600;">View LLM Output</summary>
-                <pre style="background:#fff; border:1px solid #dee2e6; padding:12px; border-radius:4px; font-size:12px; white-space:pre-wrap; margin-top:8px;">{output}</pre>
-            </details>
-        </div>"""
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RAPF Requirements Analysis Report</title>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 40px 20px; color: #212529; }}
-        h1 {{ color: #1a4f7a; border-bottom: 3px solid #1a4f7a; padding-bottom: 12px; }}
-        h2 {{ color: #1a4f7a; margin-top: 32px; }}
-        .subtitle {{ color: #6c757d; font-size: 14px; margin-top: -8px; margin-bottom: 24px; }}
-        .summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 16px 0; }}
-        .summary-card {{ background: #f0f4f8; border-radius: 8px; padding: 16px; text-align: center; }}
-        .summary-card .number {{ font-size: 32px; font-weight: bold; color: #1a4f7a; }}
-        .summary-card .label {{ font-size: 12px; color: #6c757d; margin-top: 4px; }}
-        .attr-table {{ width: 100%; border-collapse: collapse; margin: 12px 0; }}
-        .attr-table th {{ background: #1a4f7a; color: white; padding: 8px 12px; text-align: left; }}
-        .attr-table td {{ padding: 8px 12px; border-bottom: 1px solid #dee2e6; }}
-        .attr-table tr:nth-child(even) {{ background: #f8f9fa; }}
-        .footer {{ margin-top: 40px; padding-top: 16px; border-top: 1px solid #dee2e6; font-size: 12px; color: #6c757d; text-align: center; }}
-    </style>
-</head>
-<body>
-    <h1>RAPF Requirements Analysis Report</h1>
-    <div class="subtitle">Generated: {generated_at} &nbsp;|&nbsp; Requirements-Aware Prompting Framework &nbsp;|&nbsp; Chalmers & University of Gothenburg</div>
-
-    <h2>What is RAPF?</h2>
-    <p>RAPF (Requirements-Aware Prompting Framework) checks whether software requirements are ready to implement. Instead of blindly asking an LLM to build something from a vague requirement, RAPF first grades each requirement on four ISO/IEC/IEEE 29148 quality attributes, then either implements it or generates a defect report explaining what needs to be fixed first.</p>
-
-    <h2>How It Works</h2>
-    <ol>
-        <li>Each requirement is graded on four quality dimensions (U, C, V, S) scored 1-5.</li>
-        <li>A compiled-constraints prompt is built dynamically from those scores.</li>
-        <li>If U&ge;4 AND V&ge;4: policy = <b>IMPLEMENT</b> (LLM writes Python code).</li>
-        <li>Otherwise: policy = <b>REPORT_ONLY</b> (LLM writes a structured defect report).</li>
-        <li>Output is classified: Implementation, Diagnostic, Assumption, Refusal, or Other.</li>
-    </ol>
-
-    <h2>Quality Attributes (ISO/IEC/IEEE 29148)</h2>
-    <table class="attr-table">
-        <tr><th>Score</th><th>Attribute</th><th>What it checks</th></tr>
-        <tr><td><b>U</b></td><td>Unambiguity</td><td>Is it clear? Can it only be interpreted one way?</td></tr>
-        <tr><td><b>C</b></td><td>Completeness</td><td>Does it contain everything a developer needs?</td></tr>
-        <tr><td><b>V</b></td><td>Verifiability</td><td>Can it be tested or measured objectively?</td></tr>
-        <tr><td><b>S</b></td><td>Consistency</td><td>Does it contradict itself or other requirements?</td></tr>
-    </table>
-    <p>Score <b>4 or 5</b> = ready to build. Below 4 = needs work before implementation.</p>
-
-    <h2>Analysis Summary</h2>
-    <div class="summary-grid">
-        <div class="summary-card"><div class="number">{total}</div><div class="label">Total Analyzed</div></div>
-        <div class="summary-card"><div class="number">{implement}</div><div class="label">IMPLEMENT</div></div>
-        <div class="summary-card"><div class="number">{report_only}</div><div class="label">REPORT_ONLY</div></div>
-        <div class="summary-card"><div class="number">{implementation_count}</div><div class="label">Implemented</div></div>
-        <div class="summary-card"><div class="number">{diagnostic}</div><div class="label">Defect Reports</div></div>
-    </div>
-
-    <h2>Individual Requirement Results</h2>
-    {rows_html}
-
-    <div class="footer">
-        Generated by RAPF-Agent &nbsp;|&nbsp; Built by <b>Dhanvarshinie Rajan</b> &nbsp;|&nbsp;
-        M.Sc. Software Engineering and Management &nbsp;|&nbsp;
-        Chalmers University of Technology &amp; University of Gothenburg 2026 &nbsp;|&nbsp;
-        <a href="https://dhanvarshinie.lovable.app/">Portfolio</a>
-    </div>
-</body>
-</html>"""
-
-    return html
-
-def preprocess_requirement(req_text):
-    """
-    Clean requirement text before grading:
-    1. Strip section numbers (e.g. 7.3.4, 3.2.1.a)
-    2. Warn if requirement is too long
-    Returns cleaned text.
-    """
-    import re
-    # Strip leading section numbers like "7.3.4", "3.2.1.a", "REQ-001"
-    cleaned = re.sub(r"^[\d]+[\d\.\-a-zA-Z]*\s+", "", req_text.strip())
-    # Also strip formats like "FR-01:", "REQ001:"
-    cleaned = re.sub(r"^[A-Z]{1,5}[-_]?\d+[:\.\s]+", "", cleaned)
-    return cleaned.strip()
-
-def split_compound_requirement(req_text):
-    """
-    Split compound requirements joined by 'and' or ';' into separate ones.
-    e.g. "The system shall login users and generate reports" -> two requirements
-    Only splits on clear compound patterns to avoid false splits.
-    """
-    import re
-    # Pattern: "shall/must/should X and Y" where Y starts with a verb
-    parts = re.split(r"\s+and\s+(?=the\s|a\s|an\s|be\s|allow\s|enable\s|provide\s|support\s|ensure\s|generate\s|display\s|send\s|store\s|process\s)", req_text, flags=re.IGNORECASE)
-    if len(parts) > 1:
-        # Carry the subject/verb from first part into subsequent parts
-        prefix = re.match(r"^(the\s+\w+\s+(?:shall|must|should|will)\s+)", parts[0], re.IGNORECASE)
-        result = [parts[0]]
-        for part in parts[1:]:
-            if prefix:
-                result.append(prefix.group(1) + part)
-            else:
-                result.append(part)
-        return result
-    return [req_text]
-
-def validate_requirement(req_text):
-    """
-    Check requirement length and return warning if too long.
-    """
-    if len(req_text) > 500:
-        return f"⚠️ This requirement is very long ({len(req_text)} chars). Consider splitting it for better analysis."
-    if len(req_text) < 10:
-        return "⚠️ This requirement is very short — it may not contain enough information to grade accurately."
-    return None
 
 def grade_requirement(req_text):
     prompt = f"""Grade this software requirement on four ISO/IEC/IEEE 29148 quality attributes.
