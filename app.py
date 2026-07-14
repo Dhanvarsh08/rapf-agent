@@ -77,13 +77,23 @@ Score **4 or 5** = ready to build. Below 4 = needs work first.
 
 st.sidebar.markdown("""
 ---
-### ⚡ Policy Directives
+### ⚡ When does RAPF implement vs. report?
 
-🟢 **U≥4 AND V≥4** → `IMPLEMENT`  
-The LLM writes code.
+RAPF makes a simple decision for each requirement:
 
-🔴 **Otherwise** → `REPORT_ONLY`  
-The LLM writes a defect report.
+🟢 **Ready to build?**  
+If the requirement is **clear enough to understand** and **specific enough to test**, 
+the LLM writes code.
+
+🔴 **Not ready yet?**  
+If it's vague or untestable, the LLM writes a defect report instead — 
+listing exactly what's missing or unclear before anyone starts building.
+
+The two things that matter most are:
+- **Is it clear?** (one interpretation only)
+- **Can you test it?** (measurable outcome)
+
+If both are true, build it. If not, fix it first.
 """)
 
 st.sidebar.markdown("""
