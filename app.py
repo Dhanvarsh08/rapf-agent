@@ -1,5 +1,7 @@
 
 import streamlit as st
+import chromadb
+from sentence_transformers import SentenceTransformer
 from fpdf import FPDF
 import io
 from datetime import datetime
@@ -19,6 +21,49 @@ if not api_key:
     st.stop()
 
 client = Groq(api_key=api_key)
+
+@st.cache_resource
+def load_rag_components():
+    """Load ChromaDB and embedding model once at startup."""
+    embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+    chroma_client = chromadb.Client()
+    collection = chroma_client.create_collection("iso29148_criteria")
+
+    iso_criteria = [
+        {"id":"U1","attribute":"Unambiguity","text":"The requirement admits exactly one valid interpretation. A requirement is unambiguous if it can only be read in one way by all stakeholders."},
+        {"id":"U2","attribute":"Unambiguity","text":"Lexical ambiguity arises when a term admits multiple meanings. For example, secure can mean protected or fastened. Requirements must avoid such terms without qualification."},
+        {"id":"U3","attribute":"Unambiguity","text":"Pragmatic ambiguity arises when interpretation depends on unstated contextual assumptions. Requirements should be self-contained and not rely on implicit context."},
+        {"id":"U4","attribute":"Unambiguity","text":"Syntactic ambiguity occurs when sentence structure allows multiple parse trees. Requirements should use simple, unambiguous sentence structures."},
+        {"id":"U5","attribute":"Unambiguity","text":"A requirement scores low on unambiguity when multiple valid interpretations exist, when subjective terms are used without measurable criteria, or when the subject of the requirement is unclear."},
+        {"id":"C1","attribute":"Completeness","text":"All necessary information for implementation is explicitly specified. A complete requirement contains all the information a developer needs without having to infer or assume missing details."},
+        {"id":"C2","attribute":"Completeness","text":"Incompleteness arises when essential conditions, constraints, or edge cases are omitted, forcing implementers to infer missing information."},
+        {"id":"C3","attribute":"Completeness","text":"A requirement is incomplete when it omits necessary constraints, preconditions, postconditions, error handling, or operational boundaries required for correct implementation."},
+        {"id":"C4","attribute":"Completeness","text":"Requirements should specify what the system shall do, under what conditions, with what inputs, producing what outputs. Missing any of these elements indicates incompleteness."},
+        {"id":"C5","attribute":"Completeness","text":"A requirement scores low on completeness when a developer would need to make assumptions to implement it, when edge cases are not covered, or when success criteria are not defined."},
+        {"id":"V1","attribute":"Verifiability","text":"The requirement can be tested against observable behaviour. A verifiable requirement has a clear, measurable criterion that can be evaluated through repeatable tests."},
+        {"id":"V2","attribute":"Verifiability","text":"Non-verifiability occurs when requirements are expressed in subjective or qualitative terms that cannot be evaluated through deterministic testing."},
+        {"id":"V3","attribute":"Verifiability","text":"A requirement is verifiable if it can be evaluated against observable system behaviour using repeatable tests. Requirements using words like fast, easy, reliable, or user-friendly without measurable criteria are not verifiable."},
+        {"id":"V4","attribute":"Verifiability","text":"A verifiable requirement specifies a measurable outcome: a response time in milliseconds, an accuracy percentage, a maximum error rate, or a specific observable behaviour that can be confirmed through testing."},
+        {"id":"V5","attribute":"Verifiability","text":"A requirement scores low on verifiability when it contains subjective terms without measurement criteria, when success cannot be determined through testing, or when the expected output is not observable."},
+        {"id":"S1","attribute":"Consistency","text":"The requirement does not conflict with other requirements or assumptions. A consistent requirement is internally coherent and compatible with the broader system specification."},
+        {"id":"S2","attribute":"Consistency","text":"Inconsistency emerges when requirements contradict each other or rely on incompatible assumptions."},
+        {"id":"S3","attribute":"Consistency","text":"A requirement is internally inconsistent when it contains contradictory statements within itself, such as requiring both exclusive and non-exclusive access, or both mandatory and optional behaviour."},
+        {"id":"S4","attribute":"Consistency","text":"Consistency is a document-level property. A requirement may be internally consistent but conflict with other requirements in the same specification."},
+        {"id":"S5","attribute":"Consistency","text":"A requirement scores low on consistency when it contradicts itself, uses conflicting terminology, or makes assumptions incompatible with other stated requirements."},
+        {"id":"P1","attribute":"Policy","text":"A requirement is executable when both unambiguity and verifiability scores are at or above 4. Under these conditions, the policy directive is IMPLEMENT."},
+        {"id":"P2","attribute":"Policy","text":"When a requirement is not executable, the policy directive is REPORT_ONLY. The LLM is instructed to generate a structured defect report rather than implementation code."},
+        {"id":"P3","attribute":"Policy","text":"The compiled-constraints prompt augments the baseline with a structured constraint block aligned with ISO 29148 quality attributes. The constraints are tailored to the quality mode of the requirement."},
+    ]
+
+    texts = [c["text"] for c in iso_criteria]
+    ids = [c["id"] for c in iso_criteria]
+    metadatas = [{"attribute": c["attribute"]} for c in iso_criteria]
+    embeddings = embedding_model.encode(texts).tolist()
+
+    collection.add(documents=texts, embeddings=embeddings, ids=ids, metadatas=metadatas)
+    return embedding_model, collection
+
+embedding_model, iso_collection = load_rag_components()
 
 st.set_page_config(
     page_title="RAPF - Requirements Analyser",
@@ -98,12 +143,77 @@ exactly what to fix.
 
 st.sidebar.markdown("""
 ---
+### Grading Mode
+""")
+
+grading_mode = st.sidebar.radio(
+    "Choose grading approach:",
+    ["RAG-Enhanced Grading (Recommended)", "Standard Grading"],
+    help="RAG-Enhanced retrieves ISO 29148 criteria before grading each requirement"
+)
+
+st.sidebar.markdown("""
+**Standard Grading**  
+The AI grades your requirement based on its own training knowledge of what makes a good software requirement.
+
+**RAG-Enhanced Grading**  
+Before grading, the AI retrieves the most relevant quality criteria from an ISO/IEC/IEEE 29148 knowledge base — like giving the AI a reference book to check before scoring. This makes grading more accurate and grounded in the actual standard.
+
+*RAG (Retrieval-Augmented Generation) is a technique where the AI looks up relevant information before generating a response, rather than relying purely on what it learned during training.*
+""")
+
+st.sidebar.markdown("""
+---
 ### Built by
 **Dhanvarshinie Rajan**  
 M.Sc. Software Engineering & Management  
 Chalmers University of Technology & University of Gothenburg · 2026  
 [Portfolio](https://dhanvarshinie.lovable.app/)
 """)
+
+def grade_requirement_rag(req_text):
+    """RAG-enhanced grading using ChromaDB + ISO 29148 knowledge base."""
+    req_embedding = embedding_model.encode([req_text]).tolist()
+    results = iso_collection.query(query_embeddings=req_embedding, n_results=4)
+    retrieved_context = ""
+    for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+        attr = meta["attribute"]
+        retrieved_context += f"\n[{attr}] {doc}"
+
+    prompt = f"""You are a requirements quality auditor trained in ISO/IEC/IEEE 29148.
+
+Grade this software requirement using the following relevant ISO 29148 quality criteria as reference:
+
+RETRIEVED CRITERIA:
+{retrieved_context}
+
+REQUIREMENT TO GRADE: {req_text}
+
+Using the criteria above as your reference, score the requirement on:
+- U (Unambiguity): one interpretation only (1=very ambiguous, 5=completely clear)
+- C (Completeness): all details to implement (1=major gaps, 5=fully complete)
+- V (Verifiability): can be tested (1=untestable, 5=clearly testable)
+- S (Consistency): no contradictions (1=contradictory, 5=fully consistent)
+
+Return ONLY minified JSON, no preamble:
+{{"U":score,"C":score,"V":score,"S":score}}"""
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=30
+        )
+        scores = json.loads(response.choices[0].message.content.strip())
+        return float(scores["U"]), float(scores["C"]), float(scores["V"]), float(scores["S"])
+    except json.JSONDecodeError:
+        st.warning("Could not parse RAG grading scores — using defaults.")
+        return 3.0, 3.0, 3.0, 4.0
+    except Exception as e:
+        if "rate_limit" in str(e).lower():
+            st.error("Groq rate limit hit — please wait a few seconds and try again.")
+        return 3.0, 3.0, 3.0, 4.0
 
 def grade_requirement(req_text):
     prompt = f"""Grade this software requirement on four ISO/IEC/IEEE 29148 quality attributes.
@@ -238,7 +348,10 @@ def run_analysis(requirements, run_mode):
         if warning:
             st.warning(f"Requirement {i+1}: {warning}")
 
-        u, c, v, s = grade_requirement(req_text)
+        if grading_mode == "RAG-Enhanced Grading (Recommended)":
+            u, c, v, s = grade_requirement_rag(req_text)
+        else:
+            u, c, v, s = grade_requirement(req_text)
         time.sleep(0.2)
 
         exec_flag = (u >= 4) and (v >= 4)
