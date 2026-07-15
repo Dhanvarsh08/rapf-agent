@@ -56,9 +56,9 @@ The app automatically handles:
 | Component | Tool |
 |---|---|
 | LLM inference | Groq API (Llama 3.1 8B Instant) |
-| Embeddings | HuggingFace sentence-transformers |
-| Vector store | ChromaDB |
-| Orchestration | LangChain |
+| Embeddings | HuggingFace sentence-transformers (all-MiniLM-L6-v2) |
+| Vector store | ChromaDB (ISO 29148 knowledge base, 23 criteria chunks) |
+| RAG retrieval | Semantic search over ISO 29148 criteria before grading |
 | UI | Streamlit |
 | Deployment | Streamlit Community Cloud |
 
