@@ -2,6 +2,9 @@
 import streamlit as st
 import chromadb
 from sentence_transformers import SentenceTransformer
+from langchain_groq import ChatGroq
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 from fpdf import FPDF
 import io
 from datetime import datetime
@@ -13,7 +16,7 @@ from groq import Groq
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
+load_dotenv(override=True)
 
 api_key = os.getenv("GROQ_API_KEY")
 if not api_key:
@@ -24,9 +27,18 @@ client = Groq(api_key=api_key)
 
 @st.cache_resource
 def load_rag_components():
-    """Load ChromaDB and embedding model once at startup."""
+    """Load ChromaDB (persistent) and embedding model once at startup."""
     embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-    chroma_client = chromadb.Client()
+
+    # Persistent ChromaDB - survives app restarts
+    chroma_client = chromadb.PersistentClient(path="./chroma_db")
+
+    # Only create and populate if collection doesn't exist
+    existing = [c.name for c in chroma_client.list_collections()]
+    if "iso29148_criteria" in existing:
+        collection = chroma_client.get_collection("iso29148_criteria")
+        return embedding_model, collection
+
     collection = chroma_client.create_collection("iso29148_criteria")
 
     iso_criteria = [
@@ -64,6 +76,37 @@ def load_rag_components():
     return embedding_model, collection
 
 embedding_model, iso_collection = load_rag_components()
+
+# LangChain chain for compiled-constraints prompting
+@st.cache_resource
+def load_langchain_chain():
+    llm = ChatGroq(
+        api_key=os.getenv("GROQ_API_KEY"),
+        model_name="llama-3.1-8b-instant",
+        temperature=0
+    )
+
+    prompt_template = PromptTemplate(
+        input_variables=["requirement", "task", "constraint_block", "policy", "output_instruction"],
+        template="""You are a professional software engineer.
+
+Requirement:
+{requirement}
+
+Task: {task}
+
+Constraints:
+{constraint_block}
+
+Policy: {policy}
+
+{output_instruction}"""
+    )
+
+    chain = prompt_template | llm | StrOutputParser()
+    return chain
+
+langchain_chain = load_langchain_chain()
 
 st.set_page_config(
     page_title="RAPF - Requirements Analyser",
@@ -171,7 +214,167 @@ Chalmers University of Technology & University of Gothenburg · 2026
 [Portfolio](https://dhanvarshinie.lovable.app/)
 """)
 
-def grade_requirement_rag(req_text):
+def generate_html_report(results_df, run_mode):
+    """Generate a clean HTML report explaining what RAPF did."""
+
+    total = len(results_df)
+    implement = int(results_df["Exec Flag"].sum()) if "Exec Flag" in results_df.columns else 0
+    report_only = total - implement
+    diagnostic = int((results_df["RAPF Behaviour"] == "Diagnostic").sum()) if "RAPF Behaviour" in results_df.columns else 0
+    implementation_count = int((results_df["RAPF Behaviour"] == "Implementation").sum()) if "RAPF Behaviour" in results_df.columns else 0
+    generated_at = datetime.now().strftime("%d %B %Y, %H:%M")
+
+    rows_html = ""
+    for i, row in results_df.iterrows():
+        behaviour = str(row.get("RAPF Behaviour", "Unknown"))
+        policy = str(row.get("Policy", "Unknown"))
+        req = str(row.get("Requirement", ""))
+        u = row.get("U", "?")
+        c = row.get("C", "?")
+        v = row.get("V", "?")
+        s = row.get("S", "?")
+        arch = str(row.get("Archetype", "?"))
+        what = str(row.get("What happened?", ""))
+        output = str(row.get("RAPF Output", ""))[:600]
+
+        if behaviour == "Diagnostic":
+            badge_color = "#dc3545"
+            badge_text = "DEFECT REPORT"
+            card_border = "#dc3545"
+        else:
+            badge_color = "#28a745"
+            badge_text = "IMPLEMENTED"
+            card_border = "#28a745"
+
+        rows_html += f"""
+        <div style="border-left: 4px solid {card_border}; background: #f8f9fa; padding: 16px; margin-bottom: 16px; border-radius: 4px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                <span style="background:{badge_color}; color:white; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:bold;">{badge_text}</span>
+                <span style="font-weight:600; font-size:14px;">{req}</span>
+            </div>
+            <div style="display:flex; gap:12px; margin-bottom:8px; flex-wrap:wrap;">
+                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;"><b>U</b> {u}</span>
+                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;"><b>C</b> {c}</span>
+                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;"><b>V</b> {v}</span>
+                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;"><b>S</b> {s}</span>
+                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;">Archetype: {arch}</span>
+                <span style="background:#e9ecef; padding:3px 8px; border-radius:4px; font-size:12px;">Policy: {policy}</span>
+            </div>
+            <div style="font-size:13px; color:#555; font-style:italic; margin-bottom:8px;">{what}</div>
+            <details>
+                <summary style="cursor:pointer; font-size:13px; color:#1a4f7a; font-weight:600;">View LLM Output</summary>
+                <pre style="background:#fff; border:1px solid #dee2e6; padding:12px; border-radius:4px; font-size:12px; white-space:pre-wrap; margin-top:8px;">{output}</pre>
+            </details>
+        </div>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAPF Requirements Analysis Report</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 40px 20px; color: #212529; }}
+        h1 {{ color: #1a4f7a; border-bottom: 3px solid #1a4f7a; padding-bottom: 12px; }}
+        h2 {{ color: #1a4f7a; margin-top: 32px; }}
+        .subtitle {{ color: #6c757d; font-size: 14px; margin-top: -8px; margin-bottom: 24px; }}
+        .summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 16px 0; }}
+        .summary-card {{ background: #f0f4f8; border-radius: 8px; padding: 16px; text-align: center; }}
+        .summary-card .number {{ font-size: 32px; font-weight: bold; color: #1a4f7a; }}
+        .summary-card .label {{ font-size: 12px; color: #6c757d; margin-top: 4px; }}
+        .attr-table {{ width: 100%; border-collapse: collapse; margin: 12px 0; }}
+        .attr-table th {{ background: #1a4f7a; color: white; padding: 8px 12px; text-align: left; }}
+        .attr-table td {{ padding: 8px 12px; border-bottom: 1px solid #dee2e6; }}
+        .attr-table tr:nth-child(even) {{ background: #f8f9fa; }}
+        .footer {{ margin-top: 40px; padding-top: 16px; border-top: 1px solid #dee2e6; font-size: 12px; color: #6c757d; text-align: center; }}
+    </style>
+</head>
+<body>
+    <h1>RAPF Requirements Analysis Report</h1>
+    <div class="subtitle">Generated: {generated_at} &nbsp;|&nbsp; Requirements-Aware Prompting Framework &nbsp;|&nbsp; Chalmers & University of Gothenburg</div>
+
+    <h2>What is RAPF?</h2>
+    <p>RAPF (Requirements-Aware Prompting Framework) checks whether software requirements are ready to implement. Instead of blindly asking an LLM to build something from a vague requirement, RAPF first grades each requirement on four ISO/IEC/IEEE 29148 quality attributes, then either implements it or generates a defect report explaining what needs to be fixed first.</p>
+
+    <h2>How It Works</h2>
+    <ol>
+        <li>Each requirement is graded on four quality dimensions (U, C, V, S) scored 1-5.</li>
+        <li>A compiled-constraints prompt is built dynamically from those scores.</li>
+        <li>If U&ge;4 AND V&ge;4: policy = <b>IMPLEMENT</b> (LLM writes Python code).</li>
+        <li>Otherwise: policy = <b>REPORT_ONLY</b> (LLM writes a structured defect report).</li>
+        <li>Output is classified: Implementation, Diagnostic, Assumption, Refusal, or Other.</li>
+    </ol>
+
+    <h2>Quality Attributes (ISO/IEC/IEEE 29148)</h2>
+    <table class="attr-table">
+        <tr><th>Score</th><th>Attribute</th><th>What it checks</th></tr>
+        <tr><td><b>U</b></td><td>Unambiguity</td><td>Is it clear? Can it only be interpreted one way?</td></tr>
+        <tr><td><b>C</b></td><td>Completeness</td><td>Does it contain everything a developer needs?</td></tr>
+        <tr><td><b>V</b></td><td>Verifiability</td><td>Can it be tested or measured objectively?</td></tr>
+        <tr><td><b>S</b></td><td>Consistency</td><td>Does it contradict itself or other requirements?</td></tr>
+    </table>
+    <p>Score <b>4 or 5</b> = ready to build. Below 4 = needs work before implementation.</p>
+
+    <h2>Analysis Summary</h2>
+    <div class="summary-grid">
+        <div class="summary-card"><div class="number">{total}</div><div class="label">Total Analyzed</div></div>
+        <div class="summary-card"><div class="number">{implement}</div><div class="label">IMPLEMENT</div></div>
+        <div class="summary-card"><div class="number">{report_only}</div><div class="label">REPORT_ONLY</div></div>
+        <div class="summary-card"><div class="number">{implementation_count}</div><div class="label">Implemented</div></div>
+        <div class="summary-card"><div class="number">{diagnostic}</div><div class="label">Defect Reports</div></div>
+    </div>
+
+    <h2>Individual Requirement Results</h2>
+    {rows_html}
+
+    <div class="footer">
+        Generated by RAPF-Agent &nbsp;|&nbsp; Built by <b>Dhanvarshinie Rajan</b> &nbsp;|&nbsp;
+        M.Sc. Software Engineering and Management &nbsp;|&nbsp;
+        Chalmers University of Technology &amp; University of Gothenburg 2026 &nbsp;|&nbsp;
+        <a href="https://dhanvarshinie.lovable.app/">Portfolio</a>
+    </div>
+</body>
+</html>"""
+
+    return html
+
+def preprocess_requirement(req_text):
+    """
+    Clean requirement text before grading:
+    1. Strip section numbers (e.g. 7.3.4, 3.2.1.a)
+    2. Strip REQ-001 style prefixes
+    """
+    import re
+    cleaned = re.sub(r"^[\d]+[\d\.\-a-zA-Z]*\s+", "", req_text.strip())
+    cleaned = re.sub(r"^[A-Z]{1,5}[-_]?\d+[:\s]+", "", cleaned)
+    return cleaned.strip()
+
+def split_compound_requirement(req_text):
+    """
+    Split compound requirements joined by and into separate ones.
+    """
+    import re
+    parts = re.split(r"\s+and\s+(?=the\s|a\s|an\s|be\s|allow\s|enable\s|provide\s|support\s|ensure\s|generate\s|display\s|send\s|store\s|process\s)", req_text, flags=re.IGNORECASE)
+    if len(parts) > 1:
+        prefix = re.match(r"^(the\s+\w+\s+(?:shall|must|should|will)\s+)", parts[0], re.IGNORECASE)
+        result = [parts[0]]
+        for part in parts[1:]:
+            if prefix:
+                result.append(prefix.group(1) + part)
+            else:
+                result.append(part)
+        return result
+    return [req_text]
+
+def validate_requirement(req_text):
+    """Check requirement length and return warning if too long or too short."""
+    if len(req_text) > 500:
+        return f"This requirement is very long ({len(req_text)} chars). Consider splitting it for better analysis."
+    if len(req_text) < 10:
+        return "This requirement is very short and may not contain enough information to grade accurately."
+    return None
+
+def grade_requirement_rag(req_text, inter_req_context=''):
     """RAG-enhanced grading using ChromaDB + ISO 29148 knowledge base."""
     req_embedding = embedding_model.encode([req_text]).tolist()
     results = iso_collection.query(query_embeddings=req_embedding, n_results=4)
@@ -180,12 +383,14 @@ def grade_requirement_rag(req_text):
         attr = meta["attribute"]
         retrieved_context += f"\n[{attr}] {doc}"
 
+    context_section = f"\n\nSURROUNDING REQUIREMENTS FOR CONSISTENCY CHECK:\n{inter_req_context}" if inter_req_context else ""
+
     prompt = f"""You are a requirements quality auditor trained in ISO/IEC/IEEE 29148.
 
 Grade this software requirement using the following relevant ISO 29148 quality criteria as reference:
 
 RETRIEVED CRITERIA:
-{retrieved_context}
+{retrieved_context}{context_section}
 
 REQUIREMENT TO GRADE: {req_text}
 
@@ -348,8 +553,16 @@ def run_analysis(requirements, run_mode):
         if warning:
             st.warning(f"Requirement {i+1}: {warning}")
 
+        # Build inter-requirement context (previous and next requirement)
+        context_reqs = []
+        if i > 0:
+            context_reqs.append(f"Previous: {processed_requirements[i-1][:100]}")
+        if i < total - 1:
+            context_reqs.append(f"Next: {processed_requirements[i+1][:100]}")
+        inter_req_context = " | ".join(context_reqs) if context_reqs else ""
+
         if grading_mode == "RAG-Enhanced Grading (Recommended)":
-            u, c, v, s = grade_requirement_rag(req_text)
+            u, c, v, s = grade_requirement_rag(req_text, inter_req_context)
         else:
             u, c, v, s = grade_requirement(req_text)
         time.sleep(0.2)
